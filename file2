@@ -1,0 +1,231 @@
+import pandas as pd
+import psycopg2
+import json
+connpg = psycopg2.connect(database = 'cctns_new', user = 'postgres', password = 'Password@123', host = '172.20.1.44', port = '5432')
+cur = connpg.cursor()
+sql_query = '''
+select
+	(array_agg(distinct 
+    jsonb_build_object(
+     'offender_name', tpi2."FULL_NAME", 
+     'offender_gender', tpi2 ."GENDER_CD",
+     'offender_aliases', tpi2 ."ALIAS_NAME" ,
+     'offender_dob', tpi2."DOB" ,
+     'offender_occupation', '',
+     'offender_age', tpi2."AGE",
+     'offender_mobile', tpi2."MOBILE_1",
+     'offender_email', tpi2."EMAIL",
+     'offender_religion', '',
+     'offender_nationality', tpi2."NATIONALITY_CD",
+     'offender_caste', ''
+    )
+))[1] as offender_master,
+	json_agg(distinct
+    jsonb_build_object(
+     'family_relationship', '',
+     'family_name', '',
+     'family_age', tpi2 ."AGE",
+     'family_father_or_spouse', tpi2 ."FATHER_NAME" ,
+     'family_occupation', '',
+     'family_phone', tpi2 ."MOBILE_1",
+     'family_criminal_nackground', '',
+     'family_status', '',
+     'family_present_address', '',
+     'family_permanent_address', ''
+    )
+) as family_info,
+	json_agg(distinct
+    jsonb_build_object(
+     'ps_name', jail .psarrested,
+     'crime_category', '',
+     'vehicle', '',
+     'dateofrelease', jail .releasedt,
+     'fir_reg_num', tfr."FIR_REG_NUM" ,
+     'fir_no', (tfr."FIR_SRNO" || '/' || tfr."REG_YEAR"), 
+     'ps_code', tfr."PS_CD" ,
+     'place_of_arrest', '',
+     'latitude', td .latitude ,
+     'longitude', td .longitude
+    )
+) as arrest_info,
+	json_agg(distinct
+    jsonb_build_object(
+     'dateofarrest', '',
+     'crime_major_head', tcop."CRIME_MAJOR_HEAD",
+     'crime_minor_head', tcop."CRIME_MINOR_HEAD",
+     'vehicle', '',
+     'dateofrelease', jail .releasedt,
+     'fir_reg_num', tfr."FIR_REG_NUM" ,
+     'fir_no', (tfr."FIR_SRNO" || '/' || tfr."REG_YEAR"), 
+     'ps_code', tfr."PS_CD" ,
+     'ps_name', jail .psarrested,
+     'mo', '',
+     'crime_head', tcop."CRIME_MAJOR_HEAD",
+     'sub_type', '',
+     'crime_no', td.crime_number,
+     'sections', '',
+     'crime_date', td.crime_datetime,
+     'state', '' ,
+     'city', tcop."CITY",
+     'zone', '',
+     'commisnerate', '',
+     'offence_location', td.location,
+     'offence_landmark', '',
+     'photo', jail.photo, 
+     'year', '',
+     'unit', td ."unit"
+    )
+) as cases_info,
+	json_agg(distinct
+    jsonb_build_object(
+     'ps_code', tfr."PS_CD",
+     'ps_arrested', jail.psarrested,
+     'jail_name', jail.jailname,
+     'major_head', tcop."CRIME_MAJOR_HEAD",
+     'minor_head', tcop."CRIME_MINOR_HEAD",
+     'head_crime', jail.headofcrime,
+     'prisoner_name', jail.name,
+     'prisoner_num', jail.prisonerno,
+     'release_type', '',
+     'fir_reg_num', jail.crimenos,
+     'fir_no', (tfr."FIR_SRNO" || '/' || tfr."REG_YEAR"), 
+     'admission_date', jail.admission_to_jail,
+     'release_date', jail."releasedt",
+     'address_after_release', '',
+     'identification_mark', jail.identificationmark,
+     'remarks', '',
+     'photo', jail.photo       
+    )
+) as jail_info,
+	json_agg(distinct
+    jsonb_build_object(
+     'present_address', '',
+     'permanent_address', '',
+     'city', tcop."CITY",
+     'state', '',
+     'country', '',
+     'zipcode', '',
+     'ps_locality', ''
+    )
+) as address_info,
+	json_agg(distinct
+    jsonb_build_object(
+     'proof_type', '',
+     'proof_value', ''
+    )
+) as proofs_info,
+	json_agg(distinct 
+        jsonb_build_object(
+        'asso_name', ''
+        )
+) as associates_info,
+	json_agg(distinct
+        jsonb_build_object(
+            'build', tfppf ."BUILD_TYPE",
+            'height', tfppf."HEIGHT_TO_CM",
+            'weight', tfppf."WEIGHT_KG" ,
+            'eyes', tfppf ."EYE_TYPE",
+            'haircolour', tfppf."HAIR_COLOR",
+            'face', tfppf ."FACE_TYPE",
+            'colour', tfppf ."HAIR_COLOR",
+            'teeth', tfppf."TEETH_TYPE",
+            'nose', tfppf."NOSE_TYPE",
+            'beard', tfppf."BEARD_TYPE",
+            'moustache', tfppf ."MOUSTACHES_TYPE",
+            'ear', tfppf ."EARS_MISSING",
+            'mole', '',
+            'tatoo', ''
+        )
+) as physical_info
+from 
+	public."T_PERSON_INFO" as tpi2
+left join public."T_FIR_REGISTRATION2" as tfr on
+	tpi2."FIR_NUM"::numeric = tfr."FIR_REG_NUM"::numeric
+left join public."T_FIR_PERSON_PHYSICAL_FEATURES" as tfppf on
+	tpi2 ."PERSON_CODE"::numeric = tfppf ."PERSON_CODE"::numeric
+left join public."T_CRIME_OCCURANCE_PLACE" as tcop on
+	tpi2 ."FIR_NUM"::numeric = tcop ."FIR_REG_NUM"::numeric
+left join public."M_POLICE_UNITS" as mpu on
+	tfr ."PS_CD"::text = mpu ."UNIT_CD"::text and mpu."LANG_CD" = 99
+left join jrms.jrmsdataforhydpol_new as jail on 
+	jail.crimenos like concat('%', (tfr."FIR_SRNO" || '/' || tfr."REG_YEAR"), '%')
+	and lower(trim(mpu."UNIT_NAME")) = lower(trim(jail.psarrested))
+left join techdata.crime_mapping_data as td on
+	td ."crime_number" like concat('%', (tfr."FIR_SRNO" || '/' || tfr."REG_YEAR"), '%')
+	and lower(trim(mpu."UNIT_NAME")) = lower(trim(td.police_station))
+group by
+	tpi2 ."PERSON_CODE"
+limit 100'''
+df = pd.read_sql_query(sql_query, connpg)
+
+items = df.to_dict('records')
+print("--total--", len(items))
+
+connec_pg = psycopg2.connect(database = 'cctns_2k23', user = 'postgres', password = 'Password@123', host = '172.20.1.44', port = '5432')
+other_cur = connec_pg.cursor()
+for i in range(len(items)):
+    info = items[i]['offender_master']
+    sql = "INSERT INTO public.offender_master(offender_name, offender_gender, offender_aliases, offender_dob, offender_occupation, offender_age, offender_mobile, offender_email, offender_religion,offender_nationality,offender_caste) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING offender_id"
+    val = (info['offender_name'], info['offender_gender'], info['offender_aliases'], info['offender_dob'], info['offender_occupation'],info['offender_age'],info['offender_mobile'],info['offender_email'],info['offender_religion'],info['offender_nationality'],info['offender_caste'])
+    other_cur.execute(sql, val)
+    offender_id = other_cur.fetchone()[0]
+    print("---offender_id---")
+    print(offender_id)
+
+    if len(items[i]['family_info']) > 0:
+        for info in items[i]['family_info']:
+            sql1 = "INSERT INTO public.offender_family(offender_id, family_relation, family_name, family_occupation, family_mobile, criminal_background, family_address) values(%s,%s,%s,%s,%s,%s,%s)"
+            val1 = (offender_id, info['family_relationship'], info['family_name'], info['family_occupation'], info['family_phone'], info['family_criminal_nackground'], info['family_present_address'])
+            other_cur.execute(sql1, val1)
+
+    if len(items[i]['arrest_info']) > 0:    
+        for info in items[i]['arrest_info']:
+            sql2 = "INSERT INTO public.offender_arrest_details(offender_id, ps_name, crime_category, vehicle, dateofrelease, dateofarrest, fir_reg_num, fir_no, ps_code, place_of_arrest, latitude, longitude) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+            val2 = (offender_id, info['ps_name'], info['crime_category'], info['vehicle'], info['dateofrelease'], info['dateofarrest'], info['fir_reg_num'], info['fir_no'] info['ps_code'],info['latitude'], info['longitude'])
+            other_cur.execute(sql2, val2)
+
+    if len(items[i]['cases_info']) > 0:
+        for info in items[i]['cases_info']:
+            sql3 = "INSERT INTO public.offender_cases(offender_id, dateofarrest, crime_major_head, crime_minor_head, vehicle, dateofrelease, mo, crime_head, sub_type, fir_reg_num, fir_no, crime_no, ps_code, sections, crime_date, state, ps_name, city, zone, commisnerate, offence_location, offence_landmark, photo, year, unit) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+            val3 = (offender_id, info['dateofarrest'], info['crime_major_head'], info['crime_minor_head'], info['vehicle'], info['dateofrelease'], info['mo'], info['crime_head'], info['sub_type'], info['fir_reg_num'], info['fir_no'], info['crime_no'], info['ps_code'], info['sections'], info['crime_date'], info['state'], info['ps_name'], info['city'], info['zone'], info['commisnerate'], info['offence_location'],info['offence_landmark'], info['photo'], info['year'], info['unit'])
+            other_cur.execute(sql3, val3)
+
+    if len(items[i]['jail_info']) > 0:
+        for info in items[i]['jail_info']:
+            sql4 = "INSERT INTO public.offender_jail_details(offender_id, ps_code, ps_arrested, jail_name, major_head, minor_head, head_crime, prisoner_name, prisoner_num, release_type, fir_reg_num, fir_no, admission_date, release_date, address_after_release, identification_mark, remarks, photo) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+            val4 = (offender_id, info['ps_code'], info['ps_arrested'], info['jail_name'], info['major_head'], info['minor_head'], info['head_crime'] , info['prisoner_name'], info['prisoner_num'], info['release_type'], info['fir_reg_num'], info['fir_no'], info['admission_date'], info['release_date'], info['address_after_release'], info['identification_mark'], info['remarks'], info['photo'])
+            other_cur.execute(sql4, val4)
+
+    if len(items[i]['address_info']) > 0:
+        for info in items[i]['address_info']:
+            sql5 = "INSERT INTO public.offender_address(offender_id, city, state, country, zipcode, ps_locality, present_address, permanent_address) values(%s,%s,%s,%s,%s,%s,%s,%s)"
+            val5 = (offender_id, info['city'], info['state'],  info['country'], info['zipcode'], info['ps_locality'] , info['present_address'], info['permanent_address'])
+            other_cur.execute(sql5, val5)
+
+    if len(items[i]['proofs_info']) > 0:
+        for info in items[i]['proofs_info']:
+            sql6 = "INSERT INTO public.offender_proofs(offender_id, proof_type, proof_value) values(%s,%s,%s)"
+            val6 = (offender_id, info['proof_type'], info['proof_value'])
+            other_cur.execute(sql6, val6)
+
+    if len(items[i]['associates_info']) > 0:
+        for info in items[i]['associates_info']:
+            sql7 = "INSERT INTO public.offender_associates(offender_id, asso_name) values(%s,%s)"
+            val7 = (offender_id, info['asso_name'])
+            other_cur.execute(sql7, val7)
+
+    if len(items[i]['physical_info']) > 0:
+        for info in items[i]['physical_info']:
+            sql8 = "INSERT INTO public.offender_physical_features(offender_id, ear, eyes, face, mole, nose, beard, build, tatoo, teeth, colour, height, weight, moustache, haircolour, regular_habits) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+            val8 = (offender_id, info['ear'], info['eyes'], info['face'], info['mole'], info['nose'],info['beard'],info['build'],info['tatoo'],info['teeth'],info['colour'],info['height'], info['weight'],info['moustache'],info['haircolour'])
+            other_cur.execute(sql8, val8)
+
+connec_pg.commit()
+connec_pg.close()
+connpg.close()
+
+print("completed")
+
+# connpg.commit()
+# connpg.close()
+
